@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Namaz Posture Identification</title>
+
+  <!-- MediaPipe Pose -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
+
+  <style>
+    /* ── Tokens ────────────────────────────────────────────────────── */
+    :root {
+      --ink:       #0f1923;
+      --ink-soft:  #3a4a5c;
+      --surface:   #f7f5f0;
+      --panel:     #ffffff;
+      --gold:      #c9a84c;
+      --gold-lt:   #f0e4c0;
+      --teal:      #1a6b6b;
+      --teal-lt:   #e0f2f2;
+      --radius:    12px;
+      --shadow:    0 4px 24px rgba(15,25,35,0.08);
+      --transition: 0.3s cubic-bezier(0.4,0,0.2,1);
+
+      /* posture colors */
+      --c-qiam:    #1565C0;
+      --c-rukooh:  #E65100;
+      --c-sajdah:  #B71C1C;
+      --c-julsa:   #2E7D32;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: var(--surface);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+
+    /* ── Header ────────────────────────────────────────────────────── */
+    header {
+      background: var(--ink);
+      color: white;
+      padding: 18px 32px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      border-bottom: 3px solid var(--gold);
+    }
+    .header-arabic {
+      font-size: 28px;
+      color: var(--gold);
+      line-height: 1;
+    }
+    .header-text h1 {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+    .header-text p {
+      font-size: 12px;
+      color: #8899aa;
+      margin-top: 2px;
+    }
+    .status-dot {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 12px;
+      color: #8899aa;
+    }
+    .dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: #888;
+      transition: var(--transition);
+    }
+    .dot.live { background: #4CAF50; box-shadow: 0 0 8px #4CAF50; }
+    .dot.error { background: #f44336; }
+
+    /* ── Main layout ───────────────────────────────────────────────── */
+    main {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 28px 24px;
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 24px;
+    }
+    @media (max-width: 800px) {
+      main { grid-template-columns: 1fr; }
+    }
+
+    /* ── Camera panel ──────────────────────────────────────────────── */
+    .camera-card {
+      background: var(--panel);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+    .camera-toolbar {
+      padding: 14px 18px;
+      border-bottom: 1px solid #eee;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .camera-toolbar span {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .btn {
+      padding: 8px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: var(--transition);
+    }
+    .btn-start {
+      background: var(--teal);
+      color: white;
+    }
+    .btn-start:hover { background: #145555; }
+    .btn-stop {
+      background: #c62828;
+      color: white;
+    }
+    .btn-stop:hover { background: #a31515; }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+    .video-wrapper {
+      position: relative;
+      background: #0f1923;
+      aspect-ratio: 4/3;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    video, canvas {
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+    video { opacity: 0; }  /* hidden — canvas shows annotated feed */
+
+    .placeholder {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      color: #556;
+      z-index: 2;
+    }
+    .placeholder-icon { font-size: 48px; opacity: 0.4; }
+    .placeholder p { font-size: 14px; }
+
+    /* Overlay label on video */
+    .prediction-overlay {
+      position: absolute;
+      top: 16px; left: 16px;
+      z-index: 10;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(4px);
+      border-radius: 10px;
+      padding: 10px 16px;
+      display: none;
+      min-width: 180px;
+    }
+    .overlay-posture {
+      font-size: 22px;
+      font-weight: 800;
+      color: white;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    .overlay-arabic {
+      font-size: 18px;
+      color: var(--gold);
+      margin-top: 2px;
+      direction: rtl;
+    }
+    .overlay-conf {
+      font-size: 11px;
+      color: #aaa;
+      margin-top: 4px;
+    }
+
+    /* Confidence bar */
+    .conf-bar-wrap {
+      margin-top: 6px;
+      height: 4px;
+      background: rgba(255,255,255,0.15);
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .conf-bar {
+      height: 100%;
+      border-radius: 2px;
+      transition: width 0.2s ease, background 0.2s ease;
+      background: var(--gold);
+    }
+
+    /* FPS counter */
+    .fps-badge {
+      position: absolute;
+      top: 16px; right: 16px;
+      z-index: 10;
+      background: rgba(0,0,0,0.6);
+      color: #aaa;
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 6px;
+      display: none;
+    }
+
+    /* ── Side panel ────────────────────────────────────────────────── */
+    .side-panel { display: flex; flex-direction: column; gap: 20px; }
+
+    .card {
+      background: var(--panel);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 20px;
+    }
+    .card-title {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--ink-soft);
+      margin-bottom: 14px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid #eee;
+    }
+
+    /* Current prediction card */
+    .pred-main {
+      text-align: center;
+      padding: 24px 16px;
+    }
+    .pred-emoji { font-size: 52px; margin-bottom: 8px; }
+    .pred-name {
+      font-size: 28px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      transition: color var(--transition);
+    }
+    .pred-arabic {
+      font-size: 22px;
+      color: var(--gold);
+      margin-top: 4px;
+      direction: rtl;
+    }
+    .pred-desc {
+      font-size: 12px;
+      color: var(--ink-soft);
+      margin-top: 8px;
+      line-height: 1.5;
+    }
+    .pred-waiting {
+      color: #bbb;
+      font-size: 14px;
+      font-style: italic;
+    }
+
+    /* Probability bars */
+    .prob-list { display: flex; flex-direction: column; gap: 10px; }
+    .prob-row { display: flex; flex-direction: column; gap: 4px; }
+    .prob-label-row {
+      display: flex;
+      justify-content: space-between;
+      font-size: 12px;
+    }
+    .prob-label { font-weight: 600; color: var(--ink); }
+    .prob-val { color: var(--ink-soft); }
+    .prob-track {
+      height: 8px;
+      background: #eee;
+      border-radius: 4px;
+      overflow: hidden;
+    }
+    .prob-fill {
+      height: 100%;
+      border-radius: 4px;
+      transition: width 0.25s ease;
+    }
+
+    /* Posture guide */
+    .posture-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .posture-chip {
+      border-radius: 8px;
+      padding: 10px;
+      font-size: 12px;
+      border: 2px solid transparent;
+      transition: var(--transition);
+      cursor: default;
+    }
+    .posture-chip.active { border-color: currentColor; }
+    .posture-chip .chip-name {
+      font-weight: 700;
+      font-size: 13px;
+      margin-bottom: 2px;
+    }
+    .posture-chip .chip-arabic {
+      font-size: 15px;
+      direction: rtl;
+    }
+
+    /* Session stats */
+    .stats-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .stat-box {
+      background: var(--surface);
+      border-radius: 8px;
+      padding: 12px;
+      text-align: center;
+    }
+    .stat-val {
+      font-size: 24px;
+      font-weight: 800;
+      color: var(--teal);
+    }
+    .stat-lbl {
+      font-size: 10px;
+      color: var(--ink-soft);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 2px;
+    }
+
+    /* Backend URL config */
+    .config-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .config-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--ink);
+      outline: none;
+    }
+    .config-row input:focus { border-color: var(--teal); }
+    .btn-save {
+      background: var(--gold);
+      color: var(--ink);
+      padding: 8px 14px;
+      font-size: 12px;
+    }
+    .btn-save:hover { background: #b8943e; }
+    .config-status {
+      font-size: 11px;
+      color: var(--ink-soft);
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Header ──────────────────────────────────────────────────────────────── -->
+<header>
+  <div class="header-arabic">🕌</div>
+  <div class="header-text">
+    <h1>Namaz Posture Identification</h1>
+    <p>Real-time AI detection using MediaPipe Pose + Machine Learning</p>
+  </div>
+  <div class="status-dot">
+    <div class="dot" id="statusDot"></div>
+    <span id="statusText">Offline</span>
+  </div>
+</header>
+
+<!-- ── Main ────────────────────────────────────────────────────────────────── -->
+<main>
+
+  <!-- Camera panel -->
+  <div class="camera-card">
+    <div class="camera-toolbar">
+      <span>Live Camera</span>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-start" id="startBtn" onclick="startCamera()">▶ Start</button>
+        <button class="btn btn-stop" id="stopBtn" onclick="stopCamera()" disabled>■ Stop</button>
+      </div>
+    </div>
+
+    <div class="video-wrapper" id="videoWrapper">
+      <div class="placeholder" id="placeholder">
+        <div class="placeholder-icon">📷</div>
+        <p>Click Start to begin detection</p>
+      </div>
+      <video id="video" playsinline></video>
+      <canvas id="canvas"></canvas>
+      <div class="prediction-overlay" id="predOverlay">
+        <div class="overlay-posture" id="overlayName">—</div>
+        <div class="overlay-arabic" id="overlayArabic">—</div>
+        <div class="overlay-conf" id="overlayConf">Confidence: —</div>
+        <div class="conf-bar-wrap">
+          <div class="conf-bar" id="overlayConfBar" style="width:0%"></div>
+        </div>
+      </div>
+      <div class="fps-badge" id="fpsBadge">— fps</div>
+    </div>
+  </div>
+
+  <!-- Side panel -->
+  <div class="side-panel">
+
+    <!-- Current prediction -->
+    <div class="card">
+      <div class="card-title">Current Prediction</div>
+      <div class="pred-main" id="predMain">
+        <div class="pred-emoji" id="predEmoji">🕌</div>
+        <div class="pred-waiting" id="predWaiting">Waiting for detection…</div>
+        <div id="predDetails" style="display:none;">
+          <div class="pred-name" id="predName">—</div>
+          <div class="pred-arabic" id="predArabic">—</div>
+          <div class="pred-desc" id="predDesc">—</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Probability bars -->
+    <div class="card">
+      <div class="card-title">Class Probabilities</div>
+      <div class="prob-list" id="probList">
+        <div style="font-size:12px;color:#bbb;font-style:italic;">Start camera to see probabilities</div>
+      </div>
+    </div>
+
+    <!-- Posture guide -->
+    <div class="card">
+      <div class="card-title">Posture Guide</div>
+      <div class="posture-grid">
+        <div class="posture-chip" id="chip-qiam" style="background:#e3f2fd;color:var(--c-qiam);">
+          <div class="chip-name">Qiam</div>
+          <div class="chip-arabic">قيام</div>
+        </div>
+        <div class="posture-chip" id="chip-rukooh" style="background:#fff3e0;color:var(--c-rukooh);">
+          <div class="chip-name">Rukooh</div>
+          <div class="chip-arabic">ركوع</div>
+        </div>
+        <div class="posture-chip" id="chip-Sajdah" style="background:#ffebee;color:var(--c-sajdah);">
+          <div class="chip-name">Sajdah</div>
+          <div class="chip-arabic">سجدة</div>
+        </div>
+        <div class="posture-chip" id="chip-julsa" style="background:#e8f5e9;color:var(--c-julsa);">
+          <div class="chip-name">Julsa</div>
+          <div class="chip-arabic">جلسة</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Session stats -->
+    <div class="card">
+      <div class="card-title">Session Stats</div>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-val" id="statFrames">0</div>
+          <div class="stat-lbl">Frames</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="statDetected">0</div>
+          <div class="stat-lbl">Detected</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="statAvgConf">—</div>
+          <div class="stat-lbl">Avg Conf</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-val" id="statFps">—</div>
+          <div class="stat-lbl">FPS</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Backend config -->
+    <div class="card">
+      <div class="card-title">Backend URL</div>
+      <div class="config-row">
+        <input type="text" id="backendUrl"
+               placeholder="https://your-app.onrender.com"
+               value="value="https://YOUR_HF_USERNAME-namaz-posture-api.hf.space"" />
+        <button class="btn btn-save" onclick="saveBackendUrl()">Save</button>
+      </div>
+      <div class="config-status" id="configStatus">Enter your Render deployment URL above</div>
+    </div>
+
+  </div>
+</main>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+let BACKEND_URL = localStorage.getItem('namaz_backend_url') || 'http://localhost:5000';
+document.getElementById('backendUrl').value = BACKEND_URL;
+
+const POSTURE_COLORS = {
+  qiam:   '#1565C0',
+  rukooh: '#E65100',
+  Sajdah: '#B71C1C',
+  julsa:  '#2E7D32',
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let camera = null;
+let pose = null;
+let stream = null;
+let running = false;
+
+let frameCount = 0;
+let detectedCount = 0;
+let confSum = 0;
+let fpsFrames = 0;
+let lastFpsTime = Date.now();
+
+// ── Backend config ─────────────────────────────────────────────────────────
+function saveBackendUrl() {
+  BACKEND_URL = document.getElementById('backendUrl').value.trim().replace(/\/$/, '');
+  localStorage.setItem('namaz_backend_url', BACKEND_URL);
+  document.getElementById('configStatus').textContent = '✅ Saved — pinging backend…';
+  pingBackend();
+}
+
+async function pingBackend() {
+  try {
+    const res = await fetch(`${BACKEND_URL}/`, { signal: AbortSignal.timeout(5000) });
+    if (res.ok) {
+      setStatus('live', 'Backend online');
+      document.getElementById('configStatus').textContent = '✅ Connected to backend';
+    } else {
+      setStatus('error', 'Backend error');
+    }
+  } catch {
+    setStatus('error', 'Backend unreachable');
+    document.getElementById('configStatus').textContent =
+      '❌ Cannot reach backend — check URL or start local server';
+  }
+}
+
+function setStatus(state, text) {
+  const dot = document.getElementById('statusDot');
+  dot.className = 'dot ' + state;
+  document.getElementById('statusText').textContent = text;
+}
+
+// ── Camera + MediaPipe setup ──────────────────────────────────────────────────
+async function startCamera() {
+  try {
+    document.getElementById('placeholder').style.display = 'none';
+    document.getElementById('startBtn').disabled = true;
+    document.getElementById('stopBtn').disabled = false;
+
+    running = true;
+    frameCount = 0; detectedCount = 0; confSum = 0;
+
+    // Init MediaPipe Pose
+    pose = new Pose({
+      locateFile: (file) =>
+        `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+    });
+    pose.setOptions({
+      modelComplexity: 1,
+      smoothLandmarks: true,
+      enableSegmentation: false,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.5,
+    });
+    pose.onResults(onPoseResults);
+    await pose.initialize();
+
+    // Start webcam
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: 'user' }
+    });
+    const video = document.getElementById('video');
+    video.srcObject = stream;
+    video.style.opacity = '0';
+    await video.play();
+
+    // Resize canvas to match
+    const canvas = document.getElementById('canvas');
+    canvas.width = video.videoWidth || 640;
+    canvas.height = video.videoHeight || 480;
+
+    // Show overlays
+    document.getElementById('predOverlay').style.display = 'block';
+    document.getElementById('fpsBadge').style.display = 'block';
+
+    setStatus('live', 'Detecting');
+
+    // MediaPipe Camera utility
+    camera = new Camera(video, {
+      onFrame: async () => {
+        if (!running) return;
+        await pose.send({ image: video });
+      },
+      width: 640,
+      height: 480,
+    });
+    camera.start();
+
+  } catch (err) {
+    console.error(err);
+    setStatus('error', 'Camera error');
+    document.getElementById('placeholder').style.display = 'flex';
+    document.getElementById('placeholder').querySelector('p').textContent =
+      '❌ Camera error: ' + err.message;
+    document.getElementById('startBtn').disabled = false;
+    document.getElementById('stopBtn').disabled = true;
+  }
+}
+
+function stopCamera() {
+  running = false;
+  if (camera) { camera.stop(); camera = null; }
+  if (pose) { pose.close(); pose = null; }
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+
+  document.getElementById('startBtn').disabled = false;
+  document.getElementById('stopBtn').disabled = true;
+  document.getElementById('predOverlay').style.display = 'none';
+  document.getElementById('fpsBadge').style.display = 'none';
+  document.getElementById('placeholder').style.display = 'flex';
+  document.getElementById('placeholder').querySelector('p').textContent =
+    'Click Start to begin detection';
+
+  // Clear canvas
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  setStatus('', 'Offline');
+  document.getElementById('statusDot').className = 'dot';
+}
+
+// ── MediaPipe results handler ─────────────────────────────────────────────────
+async function onPoseResults(results) {
+  if (!running) return;
+
+  const canvas = document.getElementById('canvas');
+  const ctx = canvas.getContext('2d');
+
+  ctx.save();
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Draw camera frame
+  ctx.drawImage(results.image, 0, 0, canvas.width, canvas.height);
+
+  // Update FPS
+  frameCount++;
+  fpsFrames++;
+  const now = Date.now();
+  if (now - lastFpsTime >= 1000) {
+    const fps = Math.round(fpsFrames * 1000 / (now - lastFpsTime));
+    document.getElementById('fpsBadge').textContent = fps + ' fps';
+    document.getElementById('statFps').textContent = fps;
+    fpsFrames = 0;
+    lastFpsTime = now;
+  }
+  document.getElementById('statFrames').textContent = frameCount;
+
+  if (results.poseLandmarks && results.poseLandmarks.length === 33) {
+    // Draw skeleton
+    drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
+      { color: 'rgba(255,255,255,0.4)', lineWidth: 2 });
+    drawLandmarks(ctx, results.poseLandmarks,
+      { color: '#c9a84c', lineWidth: 1, radius: 4 });
+
+    // Build feature vector: 33 × 4
+    const features = [];
+    for (const lm of results.poseLandmarks) {
+      features.push(lm.x, lm.y, lm.z, lm.visibility);
+    }
+
+    // Send to backend
+    try {
+      const res = await fetch(`${BACKEND_URL}/predict`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ landmarks: features }),
+        signal: AbortSignal.timeout(2000),
+      });
+
+      if (res.ok) {
+        const data = await res.json();
+        updateUI(data);
+        detectedCount++;
+        confSum += data.confidence || 0;
+        document.getElementById('statDetected').textContent = detectedCount;
+        document.getElementById('statAvgConf').textContent =
+          Math.round(confSum / detectedCount * 100) + '%';
+      }
+    } catch {
+      // silent fail on timeout — keep drawing
+    }
+  }
+
+  ctx.restore();
+}
+
+// ── UI update ─────────────────────────────────────────────────────────────────
+function updateUI(data) {
+  const { prediction, confidence, probabilities, arabic, description, color, emoji } = data;
+
+  // Overlay on video
+  document.getElementById('overlayName').textContent = prediction.toUpperCase();
+  document.getElementById('overlayName').style.color = color || 'white';
+  document.getElementById('overlayArabic').textContent = arabic || '';
+  document.getElementById('overlayConf').textContent =
+    'Confidence: ' + Math.round((confidence || 0) * 100) + '%';
+  document.getElementById('overlayConfBar').style.width =
+    Math.round((confidence || 0) * 100) + '%';
+  document.getElementById('overlayConfBar').style.background = color || '#c9a84c';
+
+  // Side card
+  document.getElementById('predWaiting').style.display = 'none';
+  document.getElementById('predDetails').style.display = 'block';
+  document.getElementById('predEmoji').textContent = emoji || '🕌';
+  document.getElementById('predName').textContent = prediction;
+  document.getElementById('predName').style.color = color || 'inherit';
+  document.getElementById('predArabic').textContent = arabic || '';
+  document.getElementById('predDesc').textContent = description || '';
+
+  // Probability bars
+  if (probabilities && Object.keys(probabilities).length > 0) {
+    const sorted = Object.entries(probabilities).sort((a, b) => b[1] - a[1]);
+    document.getElementById('probList').innerHTML = sorted.map(([cls, p]) => `
+      <div class="prob-row">
+        <div class="prob-label-row">
+          <span class="prob-label">${cls}</span>
+          <span class="prob-val">${Math.round(p * 100)}%</span>
+        </div>
+        <div class="prob-track">
+          <div class="prob-fill"
+               style="width:${Math.round(p*100)}%;background:${POSTURE_COLORS[cls]||'#888'}">
+          </div>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  // Highlight active posture chip
+  ['qiam','rukooh','Sajdah','julsa'].forEach(cls => {
+    const chip = document.getElementById('chip-' + cls);
+    if (chip) chip.classList.toggle('active', cls === prediction);
+  });
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+pingBackend();
+</script>
+</body>
+</html>
