@@ -84,11 +84,43 @@
     .dot.live { background: #4CAF50; box-shadow: 0 0 8px #4CAF50; }
     .dot.error { background: #f44336; }
 
+    /* ── Tab bar ───────────────────────────────────────────────────── */
+    .tab-bar {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 16px 24px 0;
+      display: flex;
+      gap: 8px;
+    }
+    .tab-btn {
+      padding: 10px 20px;
+      border: none;
+      background: transparent;
+      color: var(--ink-soft);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      cursor: pointer;
+      border-radius: 10px 10px 0 0;
+      border-bottom: 3px solid transparent;
+      transition: var(--transition);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .tab-btn:hover { background: rgba(26,107,107,0.06); color: var(--ink); }
+    .tab-btn.active {
+      color: var(--teal);
+      border-bottom-color: var(--teal);
+      background: var(--panel);
+    }
+    .tab-icon { font-size: 16px; }
+
     /* ── Main layout ───────────────────────────────────────────────── */
     main {
       max-width: 1200px;
       margin: 0 auto;
-      padding: 28px 24px;
+      padding: 0 24px 28px;
       display: grid;
       grid-template-columns: 1fr 340px;
       gap: 24px;
@@ -103,6 +135,7 @@
       border-radius: var(--radius);
       box-shadow: var(--shadow);
       overflow: hidden;
+      align-self: start;
     }
     .camera-toolbar {
       padding: 14px 18px;
@@ -212,6 +245,22 @@
       background: var(--gold);
     }
 
+    /* Rakat badge on video (tab 2) */
+    .rakat-overlay {
+      position: absolute;
+      bottom: 16px; left: 16px;
+      z-index: 10;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(4px);
+      border-radius: 10px;
+      padding: 8px 14px;
+      display: none;
+      align-items: center;
+      gap: 10px;
+    }
+    .rakat-overlay .label { font-size: 11px; color: #aaa; text-transform: uppercase; letter-spacing: 0.5px; }
+    .rakat-overlay .count { font-size: 22px; font-weight: 800; color: var(--gold); }
+
     /* FPS counter */
     .fps-badge {
       position: absolute;
@@ -227,6 +276,8 @@
 
     /* ── Side panel ────────────────────────────────────────────────── */
     .side-panel { display: flex; flex-direction: column; gap: 20px; }
+    .tab-panel { display: none; flex-direction: column; gap: 20px; }
+    .tab-panel.active { display: flex; }
 
     .card {
       background: var(--panel);
@@ -376,6 +427,35 @@
       color: var(--ink-soft);
       margin-top: 6px;
     }
+
+    /* Rakat tracker card */
+    .rakat-count-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+    .rakat-count-row .lbl { font-size: 13px; color: var(--ink-soft); }
+    .rakat-count-row .val { font-size: 32px; font-weight: 800; color: var(--teal); }
+    .sequence-progress { display: flex; flex-direction: column; gap: 6px; font-size: 13px; margin-bottom: 12px; }
+    .sequence-progress .step { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
+    .rakat-issues { font-size: 11px; color: #c62828; display: flex; flex-direction: column; gap: 3px; min-height: 16px; }
+    .btn-reset {
+      background: #eee;
+      color: var(--ink);
+      width: 100%;
+      margin-top: 12px;
+    }
+    .btn-reset:hover { background: #ddd; }
+
+    .rakat-current {
+      text-align: center;
+      padding: 12px 8px 18px;
+      border-bottom: 1px solid #eee;
+      margin-bottom: 16px;
+    }
+    .rakat-current .name { font-size: 20px; font-weight: 800; text-transform: uppercase; }
+    .rakat-current .arabic { font-size: 16px; color: var(--gold); direction: rtl; margin-top: 2px; }
   </style>
 </head>
 <body>
@@ -393,10 +473,20 @@
   </div>
 </header>
 
+<!-- ── Tabs ────────────────────────────────────────────────────────────────── -->
+<div class="tab-bar">
+  <button class="tab-btn active" id="tabBtnPose" onclick="switchTab('pose')">
+    <span class="tab-icon">🧍</span> Pose Identification
+  </button>
+  <button class="tab-btn" id="tabBtnRakat" onclick="switchTab('rakat')">
+    <span class="tab-icon">📿</span> Rakat Tracker
+  </button>
+</div>
+
 <!-- ── Main ────────────────────────────────────────────────────────────────── -->
 <main>
 
-  <!-- Camera panel -->
+  <!-- Camera panel (shared across both tabs — single camera/MediaPipe instance) -->
   <div class="camera-card">
     <div class="camera-toolbar">
       <span>Live Camera</span>
@@ -413,6 +503,8 @@
       </div>
       <video id="video" playsinline></video>
       <canvas id="canvas"></canvas>
+
+      <!-- Pose Identification overlay -->
       <div class="prediction-overlay" id="predOverlay">
         <div class="overlay-posture" id="overlayName">—</div>
         <div class="overlay-arabic" id="overlayArabic">—</div>
@@ -421,92 +513,143 @@
           <div class="conf-bar" id="overlayConfBar" style="width:0%"></div>
         </div>
       </div>
+
+      <!-- Rakat Tracker overlay (only shown on Rakat tab) -->
+      <div class="rakat-overlay" id="rakatOverlay">
+        <span class="label">Rakat</span>
+        <span class="count" id="rakatOverlayCount">0</span>
+      </div>
+
       <div class="fps-badge" id="fpsBadge">— fps</div>
     </div>
   </div>
 
-  <!-- Side panel -->
+  <!-- Side panel — swaps content based on active tab -->
   <div class="side-panel">
 
-    <!-- Current prediction -->
-    <div class="card">
-      <div class="card-title">Current Prediction</div>
-      <div class="pred-main" id="predMain">
-        <div class="pred-emoji" id="predEmoji">🕌</div>
-        <div class="pred-waiting" id="predWaiting">Waiting for detection…</div>
-        <div id="predDetails" style="display:none;">
-          <div class="pred-name" id="predName">—</div>
-          <div class="pred-arabic" id="predArabic">—</div>
-          <div class="pred-desc" id="predDesc">—</div>
-        </div>
-      </div>
-    </div>
+    <!-- ════════════ TAB 1: Pose Identification ════════════ -->
+    <div class="tab-panel active" id="tabPanelPose">
 
-    <!-- Probability bars -->
-    <div class="card">
-      <div class="card-title">Class Probabilities</div>
-      <div class="prob-list" id="probList">
-        <div style="font-size:12px;color:#bbb;font-style:italic;">Start camera to see probabilities</div>
+      <!-- Current prediction -->
+      <div class="card">
+        <div class="card-title">Current Prediction</div>
+        <div class="pred-main" id="predMain">
+          <div class="pred-emoji" id="predEmoji">🕌</div>
+          <div class="pred-waiting" id="predWaiting">Waiting for detection…</div>
+          <div id="predDetails" style="display:none;">
+            <div class="pred-name" id="predName">—</div>
+            <div class="pred-arabic" id="predArabic">—</div>
+            <div class="pred-desc" id="predDesc">—</div>
+          </div>
+        </div>
       </div>
-    </div>
 
-    <!-- Posture guide -->
-    <div class="card">
-      <div class="card-title">Posture Guide</div>
-      <div class="posture-grid">
-        <div class="posture-chip" id="chip-qiam" style="background:#e3f2fd;color:var(--c-qiam);">
-          <div class="chip-name">Qiam</div>
-          <div class="chip-arabic">قيام</div>
-        </div>
-        <div class="posture-chip" id="chip-rukooh" style="background:#fff3e0;color:var(--c-rukooh);">
-          <div class="chip-name">Rukooh</div>
-          <div class="chip-arabic">ركوع</div>
-        </div>
-        <div class="posture-chip" id="chip-Sajdah" style="background:#ffebee;color:var(--c-sajdah);">
-          <div class="chip-name">Sajdah</div>
-          <div class="chip-arabic">سجدة</div>
-        </div>
-        <div class="posture-chip" id="chip-julsa" style="background:#e8f5e9;color:var(--c-julsa);">
-          <div class="chip-name">Julsa</div>
-          <div class="chip-arabic">جلسة</div>
+      <!-- Probability bars -->
+      <div class="card">
+        <div class="card-title">Class Probabilities</div>
+        <div class="prob-list" id="probList">
+          <div style="font-size:12px;color:#bbb;font-style:italic;">Start camera to see probabilities</div>
         </div>
       </div>
-    </div>
 
-    <!-- Session stats -->
-    <div class="card">
-      <div class="card-title">Session Stats</div>
-      <div class="stats-grid">
-        <div class="stat-box">
-          <div class="stat-val" id="statFrames">0</div>
-          <div class="stat-lbl">Frames</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-val" id="statDetected">0</div>
-          <div class="stat-lbl">Detected</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-val" id="statAvgConf">—</div>
-          <div class="stat-lbl">Avg Conf</div>
-        </div>
-        <div class="stat-box">
-          <div class="stat-val" id="statFps">—</div>
-          <div class="stat-lbl">FPS</div>
+      <!-- Posture guide -->
+      <div class="card">
+        <div class="card-title">Posture Guide</div>
+        <div class="posture-grid">
+          <div class="posture-chip" id="chip-qiam" style="background:#e3f2fd;color:var(--c-qiam);">
+            <div class="chip-name">Qiam</div>
+            <div class="chip-arabic">قيام</div>
+          </div>
+          <div class="posture-chip" id="chip-rukooh" style="background:#fff3e0;color:var(--c-rukooh);">
+            <div class="chip-name">Rukooh</div>
+            <div class="chip-arabic">ركوع</div>
+          </div>
+          <div class="posture-chip" id="chip-Sajdah" style="background:#ffebee;color:var(--c-sajdah);">
+            <div class="chip-name">Sajdah</div>
+            <div class="chip-arabic">سجدة</div>
+          </div>
+          <div class="posture-chip" id="chip-julsa" style="background:#e8f5e9;color:var(--c-julsa);">
+            <div class="chip-name">Julsa</div>
+            <div class="chip-arabic">جلسة</div>
+          </div>
         </div>
       </div>
-    </div>
 
-    <!-- Backend config -->
-    <div class="card">
-      <div class="card-title">Backend URL</div>
-      <div class="config-row">
-<input type="text" id="backendUrl"
-       placeholder="https://your-app.onrender.com"
-       value="https://shakeel143-namaz-posture-api.hf.space/" />
-        <button class="btn btn-save" onclick="saveBackendUrl()">Save</button>
+      <!-- Session stats -->
+      <div class="card">
+        <div class="card-title">Session Stats</div>
+        <div class="stats-grid">
+          <div class="stat-box">
+            <div class="stat-val" id="statFrames">0</div>
+            <div class="stat-lbl">Frames</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-val" id="statDetected">0</div>
+            <div class="stat-lbl">Detected</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-val" id="statAvgConf">—</div>
+            <div class="stat-lbl">Avg Conf</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-val" id="statFps">—</div>
+            <div class="stat-lbl">FPS</div>
+          </div>
+        </div>
       </div>
-      <div class="config-status" id="configStatus">Enter your Render deployment URL above</div>
+
+      <!-- Backend config -->
+      <div class="card">
+        <div class="card-title">Backend URL</div>
+        <div class="config-row">
+          <input type="text" id="backendUrl"
+                 placeholder="https://your-app.onrender.com"
+                 value="https://shakeel143-namaz-posture-api.hf.space/" />
+          <button class="btn btn-save" onclick="saveBackendUrl()">Save</button>
+        </div>
+        <div class="config-status" id="configStatus">Enter your Render deployment URL above</div>
+      </div>
+
     </div>
+    <!-- ════════════ /TAB 1 ════════════ -->
+
+
+    <!-- ════════════ TAB 2: Rakat Tracker ════════════ -->
+    <div class="tab-panel" id="tabPanelRakat">
+
+      <!-- Live posture readout (mirrors Tab 1's prediction, independent DOM ids) -->
+      <div class="card">
+        <div class="card-title">Live Posture</div>
+        <div class="rakat-current">
+          <div class="name" id="rakatLiveName" style="color:#bbb;">Waiting…</div>
+          <div class="arabic" id="rakatLiveArabic"></div>
+        </div>
+
+        <!-- Rakat count -->
+        <div class="rakat-count-row">
+          <span class="lbl">Rakat Completed</span>
+          <span class="val" id="rakatCount">0</span>
+        </div>
+
+        <!-- Sequence progress -->
+        <div class="sequence-progress" id="sequenceProgress"></div>
+
+        <!-- Issues log -->
+        <div class="rakat-issues" id="rakatIssues"></div>
+
+        <button class="btn btn-reset" onclick="resetRakatTracker()">↺ Reset Tracker</button>
+      </div>
+
+      <!-- Sequence reference -->
+      <div class="card">
+        <div class="card-title">Expected Sequence (per Rakat)</div>
+        <div style="font-size:12px;color:var(--ink-soft);line-height:1.8;">
+          Qiam → Rukooh → Qiam (I'tidal) → Sajdah → Julsa → Sajdah
+        </div>
+      </div>
+
+    </div>
+    <!-- ════════════ /TAB 2 ════════════ -->
 
   </div>
 </main>
@@ -534,6 +677,24 @@ let detectedCount = 0;
 let confSum = 0;
 let fpsFrames = 0;
 let lastFpsTime = Date.now();
+
+let activeTab = 'pose'; // 'pose' | 'rakat'
+
+// ── Tab switching ──────────────────────────────────────────────────────────
+function switchTab(tab) {
+  activeTab = tab;
+
+  document.getElementById('tabBtnPose').classList.toggle('active', tab === 'pose');
+  document.getElementById('tabBtnRakat').classList.toggle('active', tab === 'rakat');
+  document.getElementById('tabPanelPose').classList.toggle('active', tab === 'pose');
+  document.getElementById('tabPanelRakat').classList.toggle('active', tab === 'rakat');
+
+  // Toggle which overlay shows on the video feed
+  const predOverlayVisible = running && tab === 'pose';
+  const rakatOverlayVisible = running && tab === 'rakat';
+  document.getElementById('predOverlay').style.display = predOverlayVisible ? 'block' : 'none';
+  document.getElementById('rakatOverlay').style.display = rakatOverlayVisible ? 'flex' : 'none';
+}
 
 // ── Backend config ─────────────────────────────────────────────────────────
 function saveBackendUrl() {
@@ -565,7 +726,7 @@ function setStatus(state, text) {
   document.getElementById('statusText').textContent = text;
 }
 
-// ── Camera + MediaPipe setup ──────────────────────────────────────────────────
+// ── Camera + MediaPipe setup (shared by both tabs) ────────────────────────────
 async function startCamera() {
   try {
     document.getElementById('placeholder').style.display = 'none';
@@ -604,8 +765,9 @@ async function startCamera() {
     canvas.width = video.videoWidth || 640;
     canvas.height = video.videoHeight || 480;
 
-    // Show overlays
-    document.getElementById('predOverlay').style.display = 'block';
+    // Show the overlay matching the currently active tab
+    document.getElementById('predOverlay').style.display = (activeTab === 'pose') ? 'block' : 'none';
+    document.getElementById('rakatOverlay').style.display = (activeTab === 'rakat') ? 'flex' : 'none';
     document.getElementById('fpsBadge').style.display = 'block';
 
     setStatus('live', 'Detecting');
@@ -641,6 +803,7 @@ function stopCamera() {
   document.getElementById('startBtn').disabled = false;
   document.getElementById('stopBtn').disabled = true;
   document.getElementById('predOverlay').style.display = 'none';
+  document.getElementById('rakatOverlay').style.display = 'none';
   document.getElementById('fpsBadge').style.display = 'none';
   document.getElementById('placeholder').style.display = 'flex';
   document.getElementById('placeholder').querySelector('p').textContent =
@@ -681,41 +844,6 @@ async function onPoseResults(results) {
   }
   document.getElementById('statFrames').textContent = frameCount;
 
-  // if (results.poseLandmarks && results.poseLandmarks.length === 33) {
-  //   // Draw skeleton
-  //   drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
-  //     { color: 'rgba(255,255,255,0.4)', lineWidth: 2 });
-  //   drawLandmarks(ctx, results.poseLandmarks,
-  //     { color: '#c9a84c', lineWidth: 1, radius: 4 });
-
-  //   // Build feature vector: 33 × 4
-  //   const features = [];
-  //   for (const lm of results.poseLandmarks) {
-  //     features.push(lm.x, lm.y, lm.z, lm.visibility);
-  //   }
-
-  //   // Send to backend
-  //   try {
-  //     const res = await fetch(`${BACKEND_URL}/predict`, {
-  //       method: 'POST',
-  //       headers: { 'Content-Type': 'application/json' },
-  //       body: JSON.stringify({ landmarks: features }),
-  //       signal: AbortSignal.timeout(2000),
-  //     });
-
-  //     if (res.ok) {
-  //       const data = await res.json();
-  //       updateUI(data);
-  //       detectedCount++;
-  //       confSum += data.confidence || 0;
-  //       document.getElementById('statDetected').textContent = detectedCount;
-  //       document.getElementById('statAvgConf').textContent =
-  //         Math.round(confSum / detectedCount * 100) + '%';
-  //     }
-  //   } catch {
-  //     // silent fail on timeout — keep drawing
-  //   }
-  // }
   if (results.poseLandmarks && results.poseLandmarks.length === 33) {
     // Draw skeleton
     drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
@@ -739,7 +867,8 @@ async function onPoseResults(results) {
 
       if (res.ok) {
         const data = await res.json();
-        updateUI(data);
+        updateUI(data);                                  // Tab 1 display
+        feedRakatTracker(data.prediction, data.confidence || 0); // Tab 2 logic (always runs, regardless of active tab)
         detectedCount++;
         confSum += data.confidence || 0;
         document.getElementById('statDetected').textContent = detectedCount;
@@ -750,14 +879,14 @@ async function onPoseResults(results) {
       // silent fail on timeout — keep last UI state
     }
   } else {
-    // ⭐ No person detected in frame — clear the prediction instead of leaving stale data
+    // No person detected in frame
     showNotDetected();
   }
 
   ctx.restore();
 }
 
-// ── UI update ─────────────────────────────────────────────────────────────────
+// ── UI update (Tab 1: Pose Identification) ─────────────────────────────────────
 function updateUI(data) {
   const { prediction, confidence, probabilities, arabic, description, color, emoji } = data;
 
@@ -778,9 +907,12 @@ function updateUI(data) {
     document.getElementById('predName').style.color = '#999';
     document.getElementById('predArabic').textContent = '';
     document.getElementById('predDesc').textContent = 'Posture unclear — adjust position or lighting.';
-    // still show probability bars below so they can see what it's leaning toward
+
+    updateRakatLiveReadout('Uncertain', '', '#999');
+    return; // don't fall through to the confident-prediction rendering below
   }
-  // Overlay on video
+
+  // Overlay on video (Tab 1)
   document.getElementById('overlayName').textContent = prediction.toUpperCase();
   document.getElementById('overlayName').style.color = color || 'white';
   document.getElementById('overlayArabic').textContent = arabic || '';
@@ -822,7 +954,10 @@ function updateUI(data) {
     const chip = document.getElementById('chip-' + cls);
     if (chip) chip.classList.toggle('active', cls === prediction);
   });
+
+  updateRakatLiveReadout(prediction, arabic || '', color || '#1a6b6b');
 }
+
 function showNotDetected() {
   document.getElementById('overlayName').textContent = 'NOT DETECTED';
   document.getElementById('overlayName').style.color = '#999';
@@ -845,10 +980,127 @@ function showNotDetected() {
     const chip = document.getElementById('chip-' + cls);
     if (chip) chip.classList.remove('active');
   });
+
+  updateRakatLiveReadout('Not Detected', '', '#999');
 }
-  
+
+// ════════════════════════════════════════════════════════════════════════════
+// ── TAB 2: Salah Sequence / Rakat Tracker ────────────────────────────────────
+// Pure logic layer on top of the existing per-frame predictions above.
+// No backend changes — purely client-side state machine.
+// ════════════════════════════════════════════════════════════════════════════
+
+const RAKAT_SEQUENCE = ['qiam', 'rukooh', 'qiam', 'Sajdah', 'julsa', 'Sajdah'];
+const STABILITY_FRAMES = 5;        // consecutive matching frames needed to "confirm" a posture
+const STABILITY_CONF = 0.55;       // minimum confidence to count toward stability
+
+let rakatStep = 0;                 // index into RAKAT_SEQUENCE — what we expect next
+let rakatCount = 0;
+let confirmedPosture = null;       // last CONFIRMED (stable) posture
+let candidatePosture = null;       // posture currently being observed
+let candidateStreak = 0;
+let rakatIssues = [];
+
+function updateRakatLiveReadout(name, arabic, color) {
+  const nameEl = document.getElementById('rakatLiveName');
+  const arEl = document.getElementById('rakatLiveArabic');
+  if (!nameEl) return;
+  nameEl.textContent = name;
+  nameEl.style.color = color;
+  arEl.textContent = arabic;
+}
+
+function resetRakatTracker() {
+  rakatStep = 0;
+  rakatCount = 0;
+  confirmedPosture = null;
+  candidatePosture = null;
+  candidateStreak = 0;
+  rakatIssues = [];
+  document.getElementById('rakatCount').textContent = '0';
+  document.getElementById('rakatOverlayCount').textContent = '0';
+  document.getElementById('rakatIssues').textContent = '';
+  renderSequenceProgress();
+}
+
+function renderSequenceProgress() {
+  const el = document.getElementById('sequenceProgress');
+  if (!el) return;
+  el.innerHTML = RAKAT_SEQUENCE.map((step, i) => {
+    const done = i < rakatStep;
+    const current = i === rakatStep;
+    const color = done ? '#4CAF50' : current ? '#c9a84c' : '#bbb';
+    const icon = done ? '✅' : current ? '➡️' : '⬜';
+    return `<div class="step" style="color:${color};">${icon} ${step}${current ? ' (next)' : ''}</div>`;
+  }).join('');
+}
+
+function logRakatIssue(msg) {
+  rakatIssues.unshift(msg);
+  rakatIssues = rakatIssues.slice(0, 4); // keep last 4
+  const el = document.getElementById('rakatIssues');
+  if (el) el.innerHTML = rakatIssues.map(m => `<div>⚠️ ${m}</div>`).join('');
+}
+
+/**
+ * Call once per /predict response. Handles stability filtering + sequence
+ * validation internally. Runs regardless of which tab is active, so the
+ * rakat count keeps accumulating even while viewing Tab 1.
+ */
+function feedRakatTracker(prediction, confidence) {
+  if (!prediction) return; // "not detected" frames are ignored, don't break the streak
+  if (confidence < STABILITY_CONF) return; // ignore low-confidence frames entirely
+
+  if (prediction === candidatePosture) {
+    candidateStreak++;
+  } else {
+    candidatePosture = prediction;
+    candidateStreak = 1;
+  }
+
+  if (candidateStreak < STABILITY_FRAMES) return; // not stable yet
+  if (candidatePosture === confirmedPosture) return; // no change since last confirmation
+
+  const previous = confirmedPosture;
+  confirmedPosture = candidatePosture;
+
+  const expected = RAKAT_SEQUENCE[rakatStep];
+
+  function completeRakatIfDone() {
+    if (rakatStep >= RAKAT_SEQUENCE.length) {
+      rakatCount++;
+      document.getElementById('rakatCount').textContent = rakatCount;
+      document.getElementById('rakatOverlayCount').textContent = rakatCount;
+      rakatStep = 0;
+    }
+  }
+
+  if (confirmedPosture === expected) {
+    rakatStep++;
+    renderSequenceProgress();
+    completeRakatIfDone();
+    renderSequenceProgress();
+  } else {
+    if (confirmedPosture === previous) return; // brief wobble back into same posture — ignore
+
+    const laterIndex = RAKAT_SEQUENCE.indexOf(confirmedPosture, rakatStep + 1);
+    if (laterIndex !== -1) {
+      const skipped = RAKAT_SEQUENCE.slice(rakatStep, laterIndex);
+      logRakatIssue(`Skipped: ${skipped.join(', ')}`);
+      rakatStep = laterIndex + 1;
+      renderSequenceProgress();
+      completeRakatIfDone();
+      renderSequenceProgress();
+    } else if (confirmedPosture === 'qiam' && rakatStep === 0) {
+      renderSequenceProgress(); // starting fresh / realigning — no issue
+    } else {
+      logRakatIssue(`Unexpected "${confirmedPosture}" — expected "${expected}"`);
+    }
+  }
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+renderSequenceProgress();
 pingBackend();
 </script>
 </body>
