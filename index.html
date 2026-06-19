@@ -681,6 +681,41 @@ async function onPoseResults(results) {
   }
   document.getElementById('statFrames').textContent = frameCount;
 
+  // if (results.poseLandmarks && results.poseLandmarks.length === 33) {
+  //   // Draw skeleton
+  //   drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
+  //     { color: 'rgba(255,255,255,0.4)', lineWidth: 2 });
+  //   drawLandmarks(ctx, results.poseLandmarks,
+  //     { color: '#c9a84c', lineWidth: 1, radius: 4 });
+
+  //   // Build feature vector: 33 × 4
+  //   const features = [];
+  //   for (const lm of results.poseLandmarks) {
+  //     features.push(lm.x, lm.y, lm.z, lm.visibility);
+  //   }
+
+  //   // Send to backend
+  //   try {
+  //     const res = await fetch(`${BACKEND_URL}/predict`, {
+  //       method: 'POST',
+  //       headers: { 'Content-Type': 'application/json' },
+  //       body: JSON.stringify({ landmarks: features }),
+  //       signal: AbortSignal.timeout(2000),
+  //     });
+
+  //     if (res.ok) {
+  //       const data = await res.json();
+  //       updateUI(data);
+  //       detectedCount++;
+  //       confSum += data.confidence || 0;
+  //       document.getElementById('statDetected').textContent = detectedCount;
+  //       document.getElementById('statAvgConf').textContent =
+  //         Math.round(confSum / detectedCount * 100) + '%';
+  //     }
+  //   } catch {
+  //     // silent fail on timeout — keep drawing
+  //   }
+  // }
   if (results.poseLandmarks && results.poseLandmarks.length === 33) {
     // Draw skeleton
     drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS,
@@ -694,7 +729,6 @@ async function onPoseResults(results) {
       features.push(lm.x, lm.y, lm.z, lm.visibility);
     }
 
-    // Send to backend
     try {
       const res = await fetch(`${BACKEND_URL}/predict`, {
         method: 'POST',
@@ -713,8 +747,11 @@ async function onPoseResults(results) {
           Math.round(confSum / detectedCount * 100) + '%';
       }
     } catch {
-      // silent fail on timeout — keep drawing
+      // silent fail on timeout — keep last UI state
     }
+  } else {
+    // ⭐ No person detected in frame — clear the prediction instead of leaving stale data
+    showNotDetected();
   }
 
   ctx.restore();
@@ -724,6 +761,25 @@ async function onPoseResults(results) {
 function updateUI(data) {
   const { prediction, confidence, probabilities, arabic, description, color, emoji } = data;
 
+  const CONFIDENCE_THRESHOLD = 0.5; // tune as needed
+  if ((confidence || 0) < CONFIDENCE_THRESHOLD) {
+    document.getElementById('overlayName').textContent = 'UNCERTAIN';
+    document.getElementById('overlayName').style.color = '#999';
+    document.getElementById('overlayArabic').textContent = '';
+    document.getElementById('overlayConf').textContent =
+      `Low confidence: ${Math.round((confidence||0)*100)}%`;
+    document.getElementById('overlayConfBar').style.width = Math.round((confidence||0)*100) + '%';
+    document.getElementById('overlayConfBar').style.background = '#999';
+
+    document.getElementById('predWaiting').style.display = 'none';
+    document.getElementById('predDetails').style.display = 'block';
+    document.getElementById('predEmoji').textContent = '❓';
+    document.getElementById('predName').textContent = 'Uncertain';
+    document.getElementById('predName').style.color = '#999';
+    document.getElementById('predArabic').textContent = '';
+    document.getElementById('predDesc').textContent = 'Posture unclear — adjust position or lighting.';
+    // still show probability bars below so they can see what it's leaning toward
+  }
   // Overlay on video
   document.getElementById('overlayName').textContent = prediction.toUpperCase();
   document.getElementById('overlayName').style.color = color || 'white';
@@ -767,6 +823,30 @@ function updateUI(data) {
     if (chip) chip.classList.toggle('active', cls === prediction);
   });
 }
+function showNotDetected() {
+  document.getElementById('overlayName').textContent = 'NOT DETECTED';
+  document.getElementById('overlayName').style.color = '#999';
+  document.getElementById('overlayArabic').textContent = '';
+  document.getElementById('overlayConf').textContent = 'No person in frame';
+  document.getElementById('overlayConfBar').style.width = '0%';
+
+  document.getElementById('predWaiting').style.display = 'none';
+  document.getElementById('predDetails').style.display = 'block';
+  document.getElementById('predEmoji').textContent = '🚫';
+  document.getElementById('predName').textContent = 'Not Detected';
+  document.getElementById('predName').style.color = '#999';
+  document.getElementById('predArabic').textContent = '';
+  document.getElementById('predDesc').textContent = 'No person detected in camera frame.';
+
+  document.getElementById('probList').innerHTML =
+    '<div style="font-size:12px;color:#bbb;font-style:italic;">No person detected</div>';
+
+  ['qiam','rukooh','Sajdah','julsa'].forEach(cls => {
+    const chip = document.getElementById('chip-' + cls);
+    if (chip) chip.classList.remove('active');
+  });
+}
+  
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 pingBackend();
